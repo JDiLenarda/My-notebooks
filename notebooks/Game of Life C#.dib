@@ -1,0 +1,171 @@
+#!html
+
+<center>
+    <div id="field">
+        <h2>Bientôt ici...</h2>
+        <h1>Le jeu de la vie de George Conway !</h1>
+    </div>
+    <div id="monitor">
+    <h2>
+        Iteration <output name="iteration">0</output> - <output name="cellCount">0</output> cellule(s) vivante(s)
+    <h2>
+        Calculé en <output name="computationDuration">0</output> ms - rendu en <output name="renderDuration">0</output> ms
+    <div>
+</center>
+
+#!javascript
+
+updateField = function(html) {
+    field.innerHTML = html;
+};
+
+updateMonitor = function(dict) {
+    for (const key of Object.keys(dict)) {
+        document.getElementsByName(key)[0].value = dict[key];
+    }
+}
+
+#!csharp
+
+using System.Collections.Immutable;
+
+record Cell(int X, int Y)
+{
+    public Cell[] Neighbors =>
+        new[] 
+        {
+            new Cell(X + 1, Y + 1), new Cell(X, Y + 1), new Cell(X - 1, Y + 1), 
+            new Cell(X + 1, Y),                         new Cell(X - 1, Y),     
+            new Cell(X + 1, Y - 1), new Cell(X, Y - 1), new Cell(X - 1, Y - 1), 
+        };
+}
+
+record Universe(int Iteration, ImmutableHashSet<Cell> LiveCells)
+{
+    public Universe NextGeneration()
+    {                                               // [[[
+         var newCells = LiveCells                   //  L'univers est représenté par une liste des cellules vivantes.
+            .SelectMany(cell => cell.Neighbors)     //  A chaque génération, on calcule le nouvel état des cellules vivantes,
+            .Concat(LiveCells)                      //  et de leurs voisines (vivantes ou vides). Le type choisi est un hashset,
+            .Distinct()                             //  car il est soumis à des vérifications de contenance très fréquent.
+            .Where(cell =>                          // ]]]
+                {   
+                    var isAlive = LiveCells.Contains(cell);
+                    var neighborsCount = LiveCells.Intersect(cell.Neighbors).Count;
+                    return (isAlive, neighborsCount) switch
+                    {
+                        (true, 2 or 3) => true,     // Une cellule reste vivante si elle a 2 ou 3 voisines.
+                        (false, 3) => true,         // Une cellule devient vivante si elle a 3 voisines.
+                        (_, _) => false             // Autrement, elle meurt ou reste vide.
+                    };
+                })
+            .ToImmutableHashSet();
+        return this with { Iteration = Iteration + 1, LiveCells = newCells };
+    }
+
+    public int CellCount => LiveCells.Count;
+
+    public static Universe Build(IEnumerable<Cell> liveCells) => new Universe(0, liveCells.ToImmutableHashSet());
+}
+
+#!csharp
+
+using Microsoft.DotNet.Interactive;
+using Microsoft.DotNet.Interactive.Commands;
+using System.Diagnostics;
+
+static class Cells
+{
+    /// Extrait des <c>Cell</c> d'une chaîne formatée.
+    public static IEnumerable<Cell> FromFormattedText(string text) =>
+        text.Split('\n')
+            .SelectMany((line, i) => line.Select((chr, j) => (chr, i, j)))
+            .Where(x => x.chr == 'O')
+            .Select(x => new Cell(x.j, x.i));
+
+    /// Génère une balise html de type svg à partir d'une énumération de <c>Cell</c>
+    public static string ToHtml(IEnumerable<Cell> cells, int width, int height)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(@$"<svg width=""960"" viewBox=""0 0 {width} {height}"">");
+        sb.AppendLine(@$"<rect width=""{width}"" height=""{height}"" fill=""#222222"" />");
+        foreach (var cell in cells)
+        {
+            sb.AppendLine(@$"<rect width=""0.98"" height=""0.98"" x=""{cell.X}"" y=""{cell.Y}"" rx=""0.30"" fill=""LightBlue""></rect>");
+        }
+        sb.AppendLine("</svg>");
+        return sb.ToString();
+    }
+
+    /// Génère aléatoirement une énumération de <c>Cells</c>
+    public static IEnumerable<Cell> Random(int width, int height, int percentageAlive)
+    {
+        var rng = new Random();
+        for (int i = 0; i < width; i++)
+        {
+            for (int j = 0; j < height; j++)
+            {
+                if (rng.NextDouble() < (double)percentageAlive / 100.0)
+                    yield return new Cell(i, j);
+            }
+        }
+    }
+}
+
+#!csharp
+
+#!value --name gosperGliderGun
+______________________________________________
+______________________________________________
+______________________________________________
+______________________________________________
+_____________________________O________________
+___________________________O_O________________
+_________________OO______OO____________OO_____
+________________O___O____OO____________OO_____
+_____OO________O_____O___OO___________________
+_____OO________O___O_OO____O_O________________
+_______________O_____O_______O________________
+________________O___O_________________________
+_________________OO___________________________
+______________________________________________
+______________________________________________
+______________________________________________
+______________________________________________
+
+#!csharp
+
+#!share gosperGliderGun --from value
+
+var universe = Universe.Build(Cells.FromFormattedText(gosperGliderGun));
+
+await StartRendering(universe, width: 46, height: 25);
+
+async Task StartRendering(Universe universe, int width, int height)
+{
+    var sw = new Stopwatch();
+    while (! KernelInvocationContext.Current.CancellationToken.IsCancellationRequested)
+    {
+        var delay = Task.Delay(120);
+        sw.Restart();
+        await SendJSCodeAsync($"updateField(`{Cells.ToHtml(universe.LiveCells, width, height)}`);");
+        await SendJSCodeAsync($@"updateMonitor({{ 
+            ""cellCount"": {universe.CellCount}, 
+            ""iteration"": {universe.Iteration},
+            ""renderDuration"": {sw.ElapsedMilliseconds} 
+        }});");
+        sw.Restart();
+        universe = universe.NextGeneration();
+        await SendJSCodeAsync($@"updateMonitor({{ ""computationDuration"": {sw.ElapsedMilliseconds} }});");
+        await delay;
+    }
+
+    async Task SendJSCodeAsync(string code) => await Kernel.Root.SendAsync(new SubmitCode(code, "javascript"));
+}
+
+#!csharp
+
+var (w, h) = (100, 100);
+var universe = Universe.Build(Cells.Random(w, h, 40));
+
+await StartRendering(universe, w, h);

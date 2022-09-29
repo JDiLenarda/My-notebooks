@@ -1,0 +1,124 @@
+#!fsharp
+
+type Suit = Club | Diamond | Spade | Heart
+
+type Rank =
+    | Two | Three | Four | Five 
+    | Six | Seven | Eight | Nine | Ten
+    | Jack | Queen | King | Ace
+
+type Card = Rank * Suit
+
+type Hand =
+    | HighCard of Rank list
+    | OnePair of pairRank: Rank * kickers: Rank list
+    | TwoPair of highPairRank: Rank * lowPairRank: Rank * kicker: Rank
+    | ThreeOfAKind of tripRank: Rank * kicker1: Rank * kicker2: Rank
+    | Straight of Rank list
+    | Flush of Rank
+    | FullHouse of tripRank: Rank * pairRank: Rank
+    | FourOfAKind of kindRank: Rank * kicker: Rank
+    | StraightFlush of Rank
+
+let solveHand (cards: Card list) : Hand =
+        if cards.Length <> 5 then invalidArg (nameof cards) "It's FIVE cards, cheater!"
+
+        if cards |> List.distinct |> List.length <> 5 then 
+            invalidArg (nameof cards) "It's five DIFFERENT cards, cheater!"
+
+        let sortedRanks = 
+            cards 
+            |> List.map (fun (rank, _) -> rank) 
+            |> List.sortDescending
+
+        let rankIfSequential =
+            if sortedRanks = [ Ace; Five ; Four ; Three; Two ] then Some Five
+            elif 
+                sortedRanks
+                |> List.pairwise
+                |> List.forall (fun (a, b) -> compare a b = 1) 
+            then sortedRanks |> List.max |> Some
+            else None
+
+        let allOfSameSuit =
+            cards
+            |> List.map (fun (_, suit) -> suit)
+            |> List.pairwise
+            |> List.forall (fun (a, b) -> compare a b = 0)
+            
+        match allOfSameSuit, rankIfSequential with
+        | true, Some rank -> StraightFlush rank
+        | false, Some rank -> Flush rank
+        | true, None -> Straight sortedRanks
+        | false, None ->
+            match
+                sortedRanks
+                |> List.groupBy id
+                |> List.map snd
+                |> List.sortByDescending List.length
+            with
+            | [ [ rank ; _ ; _ ; _ ] ; [ kicker ] ] -> FourOfAKind (rank, kicker)
+            | [ [ r1 ; _ ; _ ] ; [ r2 ; _ ] ] -> FullHouse (r1, r2)
+            | [ [ r ; _ ; _ ] ; [ k1 ] ; [ k2 ] ] -> ThreeOfAKind (r, max k1 k2, min k1 k2)
+            | [ [ r1 ; _ ] ; [ r2 ; _ ] ; [ k] ] -> TwoPair (max r1 r2, min r1 r2, k)
+            | [ [ r ; _ ] ; [ k1 ] ; [ k2 ] ; [ k3 ] ] -> OnePair (r, [ k1 ; k2 ; k3 ] |> List.sortDescending)
+            | _ -> HighCard sortedRanks
+
+#!fsharp
+
+#r "nuget: FsUnit, 5.0.5"
+
+#!fsharp
+
+open NUnit.Framework
+open FsUnit
+
+let constantShuffle list =
+    let rng = Random (Seed = 963530725)
+    list |> List.sortBy (fun _ -> rng.Next())
+
+let list = [ 1 .. 5 ]
+display "A suffled list has the same values as the original list."
+list |> should equivalent (constantShuffle list)
+display "A shuffled list is not sequentially equals to the original list."
+list |> should not' (equal (constantShuffle list))
+display "The same list shuffled two occurrences produce the two same shuffled list."
+constantShuffle list |> should equal (constantShuffle list)
+
+let testSolveHand = constantShuffle >> solveHand
+
+display "Fails when invalid number of cards."
+(fun () -> [(Three, Heart); (Four, Club); (Ace, Diamond); (Ace, Heart)] |> testSolveHand |> ignore) |> should throw typeof<System.ArgumentException>
+
+printfn "Fails because of several copies of same cards."
+(fun () -> [(Three, Heart); (Three, Heart); (Four, Club); (Ace, Diamond); (Ace, Heart)] |> testSolveHand |> ignore) |> should throw typeof<System.ArgumentException>
+
+display "Solves straight flush with big ace."
+[(Ten, Heart); (Jack, Heart); (Queen, Heart); (King, Heart); (Ace, Heart)] |> testSolveHand |> should equal (StraightFlush Ace)
+
+display "Solves straight flush with little ace."
+[(Two, Spade); (Three, Spade); (Four, Spade); (Five, Spade); (Ace, Spade)] |> testSolveHand |> should equal (StraightFlush Five)
+
+display "Solves four of a kinds."
+[(Seven, Club); (Seven, Diamond); (Seven, Spade); (Seven, Heart); (Queen, Club)] |> testSolveHand |> should equal <| FourOfAKind (Seven, Queen)
+
+display "Solves full house."
+[(Six, Club); (Six, Diamond); (Six, Heart); (Jack, Club); (Jack, Spade)] |> testSolveHand |> should equal <| FullHouse (Six, Jack)
+
+display "Solves flush."
+[(Eight, Heart); (Nine, Heart); (Ten, Spade); (Jack, Club); (Queen, Heart)] |> testSolveHand |> should equal (Flush Queen)
+
+display "Solves straight."
+[(Two, Diamond); (Three, Diamond); (Ten, Diamond); (King, Diamond); (Ace, Diamond)] |> testSolveHand |> should equal (Straight [Ace; King; Ten; Three; Two])
+
+display "Solves three of a kind."
+[(Three, Diamond); (Four, Club); (Four, Heart); (Four, Spade); (Jack, Spade)] |> testSolveHand |> should equal <| ThreeOfAKind (Four, Jack, Three)
+
+display "Solves two-pair."
+[(Five, Club); (Five, Diamond); (Queen, Diamond); (Queen, Heart); (King, Club)] |> testSolveHand |> should equal <| TwoPair (Queen, Five, King)
+
+display "Solves one-pair."
+[(Two, Heart); (Three, Heart); (Jack, Diamond); (King, Diamond); (King, Club)] |> testSolveHand |> should equal <| OnePair (King, [Jack; Three; Two])
+
+display "Solves high card."
+[(Four, Spade); (Five, Heart); (Seven, Heart); (Ten, Spade); (Jack, Club)] |> testSolveHand |> should equal (HighCard [Jack; Ten; Seven; Five; Four])
