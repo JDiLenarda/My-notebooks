@@ -1,3 +1,5 @@
+FROM repo/image
+
 # Copy notebooks
 
 COPY ./notebooks/ ${HOME}/notebooks/
