@@ -1,4 +1,4 @@
-FROM My-notebooks/main
+FROM my-notebooks/main
 
 # Copy notebooks
 
