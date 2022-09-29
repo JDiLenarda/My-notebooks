@@ -21,48 +21,48 @@ type Hand =
     | StraightFlush of Rank
 
 let solveHand (cards: Card list) : Hand =
-        if cards.Length <> 5 then invalidArg (nameof cards) "It's FIVE cards, cheater!"
+    if cards.Length <> 5 then invalidArg (nameof cards) "It's FIVE cards, cheater!"
 
-        if cards |> List.distinct |> List.length <> 5 then 
-            invalidArg (nameof cards) "It's five DIFFERENT cards, cheater!"
+    if cards |> List.distinct |> List.length <> 5 then 
+        invalidArg (nameof cards) "It's five DIFFERENT cards, cheater!"
 
-        let sortedRanks = 
-            cards 
-            |> List.map (fun (rank, _) -> rank) 
-            |> List.sortDescending
+    let sortedRanks = 
+        cards 
+        |> List.map (fun (rank, _) -> rank) 
+        |> List.sortDescending
 
-        let rankIfSequential =
-            if sortedRanks = [ Ace; Five ; Four ; Three; Two ] then Some Five
-            elif 
-                sortedRanks
-                |> List.pairwise
-                |> List.forall (fun (a, b) -> compare a b = 1) 
-            then sortedRanks |> List.max |> Some
-            else None
-
-        let allOfSameSuit =
-            cards
-            |> List.map (fun (_, suit) -> suit)
+    let rankIfSequential =
+        if sortedRanks = [ Ace; Five ; Four ; Three; Two ]
+        then Some Five
+        elif 
+            sortedRanks
             |> List.pairwise
-            |> List.forall (fun (a, b) -> compare a b = 0)
-            
-        match allOfSameSuit, rankIfSequential with
-        | true, Some rank -> StraightFlush rank
-        | false, Some rank -> Flush rank
-        | true, None -> Straight sortedRanks
-        | false, None ->
-            match
-                sortedRanks
-                |> List.groupBy id
-                |> List.map snd
-                |> List.sortByDescending List.length
-            with
-            | [ [ rank ; _ ; _ ; _ ] ; [ kicker ] ] -> FourOfAKind (rank, kicker)
-            | [ [ r1 ; _ ; _ ] ; [ r2 ; _ ] ] -> FullHouse (r1, r2)
-            | [ [ r ; _ ; _ ] ; [ k1 ] ; [ k2 ] ] -> ThreeOfAKind (r, max k1 k2, min k1 k2)
-            | [ [ r1 ; _ ] ; [ r2 ; _ ] ; [ k] ] -> TwoPair (max r1 r2, min r1 r2, k)
-            | [ [ r ; _ ] ; [ k1 ] ; [ k2 ] ; [ k3 ] ] -> OnePair (r, [ k1 ; k2 ; k3 ] |> List.sortDescending)
-            | _ -> HighCard sortedRanks
+            |> List.forall (fun (a, b) -> compare a b = 1) 
+        then sortedRanks |> List.max |> Some
+        else None
+
+    let allOfSameSuit =
+        cards
+        |> List.distinctBy (fun (_, suit) -> suit)
+        |> List.length = 1
+        
+    match allOfSameSuit, rankIfSequential with
+    | true, Some rank -> StraightFlush rank
+    | false, Some rank -> Flush rank
+    | true, None -> Straight sortedRanks
+    | false, None ->
+        match
+            sortedRanks
+            |> List.groupBy id
+            |> List.map snd
+            |> List.sortByDescending List.length
+        with
+        | [ [ rank ; _ ; _ ; _ ] ; [ kicker ] ] -> FourOfAKind (rank, kicker)
+        | [ [ r1 ; _ ; _ ] ; [ r2 ; _ ] ] -> FullHouse (r1, r2)
+        | [ [ r ; _ ; _ ] ; [ k1 ] ; [ k2 ] ] -> ThreeOfAKind (r, max k1 k2, min k1 k2)
+        | [ [ r1 ; _ ] ; [ r2 ; _ ] ; [ k] ] -> TwoPair (max r1 r2, min r1 r2, k)
+        | [ [ r ; _ ] ; [ k1 ] ; [ k2 ] ; [ k3 ] ] -> OnePair (r, [ k1 ; k2 ; k3 ] |> List.sortDescending)
+        | _ -> HighCard sortedRanks
 
 #!fsharp
 
@@ -73,19 +73,12 @@ let solveHand (cards: Card list) : Hand =
 open NUnit.Framework
 open FsUnit
 
-let constantShuffle list =
-    let rng = Random (Seed = 963530725)
+let shuffle list =
+    let rng = Random ()
     list |> List.sortBy (fun _ -> rng.Next())
 
-let list = [ 1 .. 5 ]
-display "A suffled list has the same values as the original list."
-list |> should equivalent (constantShuffle list)
-display "A shuffled list is not sequentially equals to the original list."
-list |> should not' (equal (constantShuffle list))
-display "The same list shuffled two occurrences produce the two same shuffled list."
-constantShuffle list |> should equal (constantShuffle list)
 
-let testSolveHand = constantShuffle >> solveHand
+let testSolveHand = shuffle >> solveHand
 
 display "Fails when invalid number of cards."
 (fun () -> [(Three, Heart); (Four, Club); (Ace, Diamond); (Ace, Heart)] |> testSolveHand |> ignore) |> should throw typeof<System.ArgumentException>
