@@ -1,4 +1,4 @@
-FROM repo/image
+FROM my-notebooks/main
 
 # Copy notebooks
 
