@@ -30,9 +30,6 @@ updateMonitor = function(dict) {
 #!csharp
 
 using System.Collections.Immutable;
-using Microsoft.DotNet.Interactive;
-using Microsoft.DotNet.Interactive.Commands;
-using System.Diagnostics;
 
 record Cell(int X, int Y)
 {
@@ -47,9 +44,10 @@ record Cell(int X, int Y)
 
 record Universe(int Iteration, ImmutableHashSet<Cell> LiveCells)
 {
+    /// logique du jeu de la vie
     public Universe NextGeneration()
     {                                               // [[[
-         var newCells = LiveCells                   //  L'univers est représenté par une liste des cellules vivantes.
+         var nextCells = LiveCells                  //  L'univers est représenté par un inventaire des cellules vivantes.
             .SelectMany(cell => cell.Neighbors)     //  A chaque génération, on calcule le nouvel état des cellules vivantes,
             .Concat(LiveCells)                      //  et de leurs voisines (vivantes ou vides). Le type choisi est un hashset,
             .Distinct()                             //  car il est soumis à des vérifications de contenance très fréquent.
@@ -65,36 +63,26 @@ record Universe(int Iteration, ImmutableHashSet<Cell> LiveCells)
                     };
                 })
             .ToImmutableHashSet();
-        return this with { Iteration = Iteration + 1, LiveCells = newCells };
+        return new Universe(Iteration + 1, nextCells);
     }
 
-    public async Task<Universe> NextGenerationAsync()
+    /// Extrait une univers d'une chaîne multiligne représentant une matrice où les O sont des cellules vivantes.
+    public static Universe BuildFromText(string text) 
     {
-        await Task.Yield();
-        return this.NextGeneration();
-    }
-
-    public Universe(IEnumerable<Cell> liveCells): this(0, liveCells.ToImmutableHashSet()) { }
-
-    public int CellCount => LiveCells.Count;
-}
-
-static class Utils
-{
-    /// Extrait des <c>Cell</c> d'une chaîne formatée.
-    public static IEnumerable<Cell> CellsFromText(string text) =>
-        text.Split('\n')
+        var cells = text.Split('\n')
             .SelectMany((line, i) => line.Select((chr, j) => (chr, i, j)))
             .Where(x => x.chr == 'O')
             .Select(x => new Cell(x.j, x.i));
+        return new Universe(0, cells.ToImmutableHashSet());
+    }
 
-    /// Génère une balise html de type svg à partir d'une énumération de <c>Cell</c>
-    public static string CellsToHtml(IEnumerable<Cell> cells, int width, int height, int viewSize)
+    /// Génère une balise html de type svg représentant graphiquement l'univers.
+    public string ToSvgMarkup(int width, int height, int viewSize)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine(@$"<svg width=""{viewSize}"" viewBox=""0 0 {width} {height}"">");
         sb.AppendLine(@$"<rect width=""{width}"" height=""{height}"" fill=""#222222"" />");
-        foreach (var cell in cells)
+        foreach (var cell in LiveCells)
         {
             sb.AppendLine(@$"<rect width=""0.98"" height=""0.98"" x=""{cell.X}"" y=""{cell.Y}"" rx=""0.30"" fill=""LightBlue""></rect>");
         }
@@ -102,18 +90,20 @@ static class Utils
         return sb.ToString();
     }
 
-    /// Génère aléatoirement une énumération de <c>Cells</c>
-    public static IEnumerable<Cell> RandomCells(int width, int height, int percentageAlive)
+    /// Génère aléatoirement un univers
+    public static Universe BuildRandom(int width, int height, int percentageAlive)
     {
         var rng = new Random();
+        var cells = ImmutableHashSet.Create<Cell>();
         for (int i = 0; i < width; i++)
         {
             for (int j = 0; j < height; j++)
             {
                 if (rng.NextDouble() < (double)percentageAlive / 100.0)
-                    yield return new Cell(i, j);
+                cells = cells.Add(new Cell(i, j));
             }
         }
+        return new Universe(0, cells);
     }
 }
 
@@ -142,9 +132,12 @@ ______________________________________________
 
 #!share gosperGliderGun --from value
 
-using static Utils;
 
-var universe = new Universe(CellsFromText(gosperGliderGun));
+using Microsoft.DotNet.Interactive;
+using Microsoft.DotNet.Interactive.Commands;
+using System.Diagnostics;
+
+var universe = Universe.BuildFromText(gosperGliderGun);
 
 await RunUniverse(universe, width: 46, height: 25);
 
@@ -155,9 +148,9 @@ async Task RunUniverse(Universe universe, int width, int height, int viewSize = 
     {
         var delay = Task.Delay(120);
         sw.Restart();
-        await SendJSCodeAsync($"updateField(`{CellsToHtml(universe.LiveCells, width, height, viewSize)}`);");
+        await SendJSCodeAsync($"updateField(`{universe.ToSvgMarkup(width, height, viewSize)}`);");
         await SendJSCodeAsync($@"updateMonitor({{ 
-            ""cellCount"": {universe.CellCount}, 
+            ""cellCount"": {universe.LiveCells.Count}, 
             ""iteration"": {universe.Iteration},
             ""renderDuration"": {sw.ElapsedMilliseconds} 
         }});");
@@ -172,10 +165,12 @@ async Task RunUniverse(Universe universe, int width, int height, int viewSize = 
 
 #!csharp
 
-using static Utils;
+using Microsoft.DotNet.Interactive;
+using Microsoft.DotNet.Interactive.Commands;
+using System.Diagnostics;
 
 var (w, h) = (150, 150);
-var universe = new Universe(RandomCells(w, h, 40));
+var universe = Universe.BuildRandom(w, h, 40);
 
 await RunUniverse(universe, w, h);
 
@@ -187,31 +182,31 @@ async Task RunUniverse(Universe universe, int width, int height, int viewSize = 
 
         await SendJSCodeAsync(
             $@"updateMonitor( {{ 
-                ""cellCount"": {universe.CellCount}, 
+                ""cellCount"": {universe.LiveCells.Count}, 
                 ""iteration"": {universe.Iteration},
             }} );");
         
         var swGeneration = Stopwatch.StartNew();
-        var nextUniverse = universe
-            .NextGenerationAsync()
-            .ContinueWith(t => 
-                {
-                    swGeneration.Stop();
-                    return t.Result;
-                });
+        var nextUniverse = Task.Run(async () =>
+            {
+                await Task.Yield();
+                var result = universe.NextGeneration();
+                swGeneration.Stop();
+                return result;
+            });
 
         var swRendering = Stopwatch.StartNew();
-        var rendering = SendJSCodeAsync($"updateField(`{CellsToHtml(universe.LiveCells, width, height, viewSize)}`);")
-            .ContinueWith(t => swRendering.Stop());
+        await SendJSCodeAsync($"updateField(`{universe.ToSvgMarkup(width, height, viewSize)}`);");
+        swRendering.Stop();
 
         universe = await nextUniverse;
-        await rendering;
 
         await SendJSCodeAsync(
             $@"updateMonitor( {{ 
                 ""renderDuration"": {swRendering.ElapsedMilliseconds},
                 ""generationDuration"": {swGeneration.ElapsedMilliseconds}
             }} );");
+
         await delay;
     }
     
