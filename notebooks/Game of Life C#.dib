@@ -2,14 +2,14 @@
 
 <center>
     <div id="field">
-        <h2>Bientôt ici...</h2>
-        <h1>Le jeu de la vie de George Conway !</h1>
+        <h2>Soon here</h2>
+        <h1>John Conway's game of life!</h1>
     </div>
     <div id="monitor">
     <h2>
-        Iteration <output name="iteration">0</output> - <output name="cellCount">0</output> cellule(s) vivante(s)
+        Iteration <output name="iteration">0</output> - <output name="cellCount">0</output> live cells
     <h2>
-        Généré en <output name="generationDuration">0</output> ms - rendu en <output name="renderDuration">0</output> ms
+        Generated in <output name="generationDuration">0</output> ms - rendered in <output name="renderDuration">0</output> ms
     <div>
 </center>
 
@@ -156,7 +156,7 @@ async Task RunUniverse(Universe universe, int width, int height, int viewSize = 
         }});");
         sw.Restart();
         universe = universe.NextGeneration();
-        await SendJSCodeAsync($@"updateMonitor({{ ""computationDuration"": {sw.ElapsedMilliseconds} }});");
+        await SendJSCodeAsync($@"updateMonitor({{ ""generationDuration"": {sw.ElapsedMilliseconds} }});");
         await delay;
     }
 
